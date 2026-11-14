@@ -1,0 +1,58 @@
+GET http://localhost:3000/api/health
+
+### Get exhibitions without login
+GET http://localhost:3000/api/exhibits
+
+### Register a new user
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "alice@example.com",
+  "password": "mySecretPassword123"
+}
+ashiox@example.com
+asdf123456
+
+### Login
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "alice@example.com",
+  "password": "mySecretPassword123"
+}
+
+### Check current user
+GET http://localhost:3000/api/auth/me
+
+### Logout
+POST http://localhost:3000/api/auth/logout
+
+### Check current user after logout
+GET http://localhost:3000/api/auth/me
+
+### Create an AI-generated exhibit
+POST http://localhost:3000/api/exhibits
+Content-Type: application/json
+
+{
+  "originalText": "I had coffee with an old friend today. We talked for hours about our childhood memories. It felt like no time had passed."
+}
+
+
+### Get all exhibits
+GET http://localhost:3000/api/exhibits
+
+
+### Get one exhibit
+GET http://localhost:3000/api/exhibits/2
+
+
+### Test invalid input
+POST http://localhost:3000/api/exhibits
+Content-Type: application/json
+
+{
+  "originalText": ""
+}
