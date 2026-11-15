@@ -1,5 +1,20 @@
-
 import { GoogleGenAI } from '@google/genai'
+
+const styleOptions = {
+  palette: ['warm', 'calm', 'dreamy', 'bright', 'minimal'],
+  font: ['serif', 'sans-serif', 'handwritten'],
+  border: ['none', 'thin-solid', 'dashed'],
+  decoration: ['none', 'stars', 'dots', 'botanical'],
+  layout: ['minimal', 'editorial', 'scrapbook', 'poster']
+}
+
+const defaultStyleConfig = {
+  palette: 'warm',
+  font: 'serif',
+  border: 'thin-solid',
+  decoration: 'none',
+  layout: 'minimal'
+}
 
 const exhibitSchema = {
   type: 'OBJECT',
@@ -18,12 +33,30 @@ const exhibitSchema = {
     },
     tags: {
       type: 'ARRAY',
-      items: {
-        type: 'STRING'
-      }
+      items: { type: 'STRING' }
+    },
+    mood: {
+      type: 'STRING',
+      description: 'A concise word or phrase for the memory’s overall mood.'
+    },
+    themes: {
+      type: 'ARRAY',
+      items: { type: 'STRING' },
+      description: 'Two to four short themes present in the memory.'
+    },
+    styleConfig: {
+      type: 'OBJECT',
+      properties: {
+        palette: { type: 'STRING', enum: styleOptions.palette },
+        font: { type: 'STRING', enum: styleOptions.font },
+        border: { type: 'STRING', enum: styleOptions.border },
+        decoration: { type: 'STRING', enum: styleOptions.decoration },
+        layout: { type: 'STRING', enum: styleOptions.layout }
+      },
+      required: ['palette', 'font', 'border', 'decoration', 'layout']
     }
   },
-  required: ['title', 'subtitle', 'description', 'tags']
+  required: ['title', 'subtitle', 'description', 'tags', 'mood', 'themes', 'styleConfig']
 }
 
 export async function generateExhibit(originalText) {
@@ -37,9 +70,7 @@ export async function generateExhibit(originalText) {
   console.log('Sending request to Gemini...')
   const response = await generateWithRetry(ai, {
     model: 'gemini-3.8-flash',
-    contents: `Create a museum exhibit based on this personal memory:
-
-"${originalText}"`,
+    contents: `Create a museum exhibit based on this personal memory:\n\n"${originalText}"`,
     config: {
       systemInstruction: `
         You are the curator of a personal museum.
@@ -55,38 +86,74 @@ export async function generateExhibit(originalText) {
         - Use a warm, slightly poetic tone.
         - Not every memory needs to sound inspirational.
         - Generate 2-4 relevant tags.
+        - Identify the memory's mood and 2-4 themes grounded in its details.
+        - Choose styleConfig identifiers only from the options in the response schema.
+        - Choose a restrained design that reflects the memory while keeping all text readable.
+        - Do not return CSS, HTML, URLs, or styling code.
       `,
       responseMimeType: 'application/json',
       responseSchema: exhibitSchema,
       temperature: 0.8,
       maxOutputTokens: 1000,
-      thinkingConfig: {
-        thinkingBudget: 0
-        },
+      thinkingConfig: { thinkingBudget: 0 }
     }
   })
+
   console.log('Gemini response received!')
-  console.log('Finish reason:', response.candidates?.[0]?.finishReason)
-console.log('Usage:', response.usageMetadata)
   if (!response.text) {
     throw new Error('Gemini returned an empty response')
   }
-  console.log('Raw Gemini response:')
-console.log(response.text)
-  const exhibit = JSON.parse(response.text)
 
-  // Basic validation before saving the AI output
+  let exhibit
+  try {
+    exhibit = JSON.parse(response.text)
+  } catch {
+    throw new Error('Gemini returned malformed exhibit JSON')
+  }
+
   if (
+    !exhibit ||
     typeof exhibit.title !== 'string' ||
+    !exhibit.title.trim() ||
     typeof exhibit.subtitle !== 'string' ||
     typeof exhibit.description !== 'string' ||
+    !exhibit.description.trim() ||
     !Array.isArray(exhibit.tags) ||
     !exhibit.tags.every(tag => typeof tag === 'string')
   ) {
     throw new Error('Gemini returned an invalid exhibit')
   }
 
-  return exhibit
+  return {
+    title: exhibit.title.trim(),
+    subtitle: exhibit.subtitle.trim(),
+    description: exhibit.description.trim(),
+    tags: normalizeStringList(exhibit.tags, 4),
+    mood: typeof exhibit.mood === 'string' ? exhibit.mood.trim().slice(0, 60) : '',
+    themes: normalizeStringList(exhibit.themes, 4),
+    styleConfig: normalizeStyleConfig(exhibit.styleConfig)
+  }
+}
+
+function normalizeStringList(value, limit) {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim().slice(0, 40))
+    .filter(Boolean)
+    .slice(0, limit)
+}
+
+function normalizeStyleConfig(value) {
+  const config = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  return Object.fromEntries(
+    Object.entries(defaultStyleConfig).map(([key, fallback]) => [
+      key,
+      typeof config[key] === 'string' && styleOptions[key].includes(config[key])
+        ? config[key]
+        : fallback
+    ])
+  )
 }
 
 async function generateWithRetry(ai, request, retries = 2) {
@@ -101,11 +168,8 @@ async function generateWithRetry(ai, request, retries = 2) {
         throw error
       }
 
-      console.log(`Gemini unavailable. Retrying (${attempt + 1}/2)...`)
-
-      await new Promise(resolve =>
-        setTimeout(resolve, 2000 * (attempt + 1))
-      )
+      console.log(`Gemini unavailable. Retrying (${attempt + 1}/${retries})...`)
+      await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)))
     }
   }
 }

@@ -23,6 +23,8 @@ model Exhibit {
   subtitle     String?
   description  String   @db.Text
   tags         String[] @default([])
+  mood         String?
+  styleConfig  Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

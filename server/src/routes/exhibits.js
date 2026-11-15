@@ -61,6 +61,47 @@ router.get('/:id', async (req, res) => {
   }
 })
 
+// DELETE one exhibit owned by the authenticated user
+router.delete('/:id', async (req, res) => {
+  const idText = req.params.id
+
+  if (!/^[1-9]\d*$/.test(idText)) {
+    return res.status(400).json({
+      error: 'Invalid exhibit ID.'
+    })
+  }
+
+  const exhibitId = Number(idText)
+  if (!Number.isSafeInteger(exhibitId) || exhibitId > 2147483647) {
+    return res.status(400).json({
+      error: 'Invalid exhibit ID.'
+    })
+  }
+
+  try {
+    const result = await prisma.exhibit.deleteMany({
+      where: {
+        id: exhibitId,
+        userId: req.session.userId
+      }
+    })
+
+    if (result.count === 0) {
+      return res.status(404).json({
+        error: 'Exhibit not found.'
+      })
+    }
+
+    return res.status(200).json({
+      message: 'Exhibit deleted successfully.'
+    })
+  } catch (error) {
+    console.error('Error deleting exhibit:', error)
+    return res.status(500).json({
+      error: 'Failed to delete exhibit.'
+    })
+  }
+})
 router.post('/', async (req, res) => {
   try {
     const { originalText } = req.body
@@ -84,20 +125,17 @@ router.post('/', async (req, res) => {
     // Ask Gemini to generate the exhibit
     const generatedExhibit = await generateExhibit(originalText.trim())
 
-    // Save the original memory and AI-generated content
-    // const newExhibit = await prisma.exhibit.create({
-    //   data: {
-    //     originalText: originalText.trim(),
-    //     title: generated.title,
-    //     subtitle: generated.subtitle,
-    //     description: generated.description,
-    //     tags: generated.tags
-    //   }
-    // })
+    // Persist only fields normalized by the server. AI output is never spread
+    // wholesale into Prisma data or interpreted as CSS.
     const newExhibit = await prisma.exhibit.create({
       data: {
         originalText,
-        ...generatedExhibit,
+        title: generatedExhibit.title,
+        subtitle: generatedExhibit.subtitle,
+        description: generatedExhibit.description,
+        tags: generatedExhibit.tags,
+        mood: generatedExhibit.mood || null,
+        styleConfig: generatedExhibit.styleConfig,
         userId: req.session.userId
       }
     })

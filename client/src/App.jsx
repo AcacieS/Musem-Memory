@@ -1,7 +1,8 @@
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import AuthForm from './AuthForm'
+import ExhibitCard from './components/ExhibitCard'
 
 function App() {
   const [backendStatus, setBackendStatus] = useState('Checking...')
@@ -13,6 +14,12 @@ function App() {
   const [galleryLoading, setGalleryLoading] = useState(true)
   const [user, setUser] = useState(null)
   const [authChecked, setAuthChecked] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState(null)
+  const [deletingExhibitId, setDeletingExhibitId] = useState(null)
+  const [deleteError, setDeleteError] = useState('')
+  const [deleteMessage, setDeleteMessage] = useState('')
+  const deleteDialogRef = useRef(null)
+  const deletingExhibitIdRef = useRef(null)
 
   useEffect(() => {
     let ignore = false
@@ -67,23 +74,37 @@ function App() {
     }
   }, [])
   useEffect(() => {
-  async function checkBackend() {
-    try {
-      const response = await fetch('/api/health')
+    let stopped = false
+    let retryTimer
 
-      if (!response.ok) {
-        throw new Error('Backend unavailable')
+    async function checkBackend() {
+      try {
+        const response = await fetch('/api/health')
+        if (!response.ok) throw new Error('Backend unavailable')
+        if (!stopped) setBackendStatus('Connected')
+      } catch {
+        if (stopped) return
+        setBackendStatus('Disconnected')
+        retryTimer = setTimeout(checkBackend, 2000)
       }
-
-      setBackendStatus('Connected')
-    } catch (err) {
-      console.error('Backend connection error:', err)
-      setBackendStatus('Disconnected')
     }
-  }
 
-  checkBackend()
-}, [])
+    checkBackend()
+    return () => {
+      stopped = true
+      clearTimeout(retryTimer)
+    }
+  }, [])
+  useEffect(() => {
+    const dialog = deleteDialogRef.current
+    if (!dialog) return
+
+    if (pendingDelete && !dialog.open) {
+      dialog.showModal()
+    } else if (!pendingDelete && dialog.open) {
+      dialog.close()
+    }
+  }, [pendingDelete])
   function handleAuthenticated(userData) {
     setUser(userData)
     setError('')
@@ -129,6 +150,56 @@ function App() {
       setGalleryLoading(false)
     }
   }
+  function requestDelete(exhibitToDelete) {
+    setDeleteError('')
+    setDeleteMessage('')
+    setPendingDelete(exhibitToDelete)
+  }
+
+  function cancelDelete() {
+    if (deletingExhibitIdRef.current !== null) return
+    setDeleteError('')
+    setPendingDelete(null)
+  }
+
+  function handleDeleteDialogCancel(event) {
+    event.preventDefault()
+    cancelDelete()
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete || deletingExhibitIdRef.current !== null) return
+
+    const exhibitId = pendingDelete.id
+    deletingExhibitIdRef.current = exhibitId
+    setDeletingExhibitId(exhibitId)
+    setDeleteError('')
+
+    try {
+      const response = await fetch(`/api/exhibits/${exhibitId}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      })
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not delete this exhibit. Please try again.')
+      }
+
+      setExhibits(current => current.filter(item => item.id !== exhibitId))
+      setExhibit(current => current?.id === exhibitId ? null : current)
+      setPendingDelete(null)
+      setDeleteMessage('Exhibit deleted.')
+    } catch (err) {
+      const message = err instanceof TypeError
+        ? 'Could not reach the server. Your exhibit is still in your museum. Please try again.'
+        : err.message || 'Could not delete this exhibit. Please try again.'
+      setDeleteError(message)
+    } finally {
+      deletingExhibitIdRef.current = null
+      setDeletingExhibitId(null)
+    }
+  }
   // Submit a new memory
   async function handleSubmit(event) {
     event.preventDefault()
@@ -152,7 +223,26 @@ function App() {
         body: JSON.stringify({ originalText })
       })
 
-      const data = await response.json()
+      const responseText = await response.text()
+      let data = null
+
+      const contentType = response.headers.get('content-type') || '(missing)'
+      if (responseText.trim()) {
+        try {
+          data = JSON.parse(responseText)
+        } catch {
+          console.error('Exhibit response was not valid JSON.', {
+            status: response.status,
+            contentType,
+            bodyLength: responseText.length
+          })
+        }
+      } else {
+        console.error('Exhibit response body was empty.', {
+          status: response.status,
+          contentType
+        })
+      }
 
       if (!response.ok) {
         if (response.status === 503) {
@@ -161,8 +251,28 @@ function App() {
           )
         }
 
+        if (data?.error || data?.message) {
+          throw new Error(data.error || data.message)
+        }
+
+        if (response.status === 502 && !contentType.includes('application/json')) {
+          throw new Error(
+            'The development proxy could not get a valid response from the API server (HTTP 502). Check that the backend is running on port 3000. Check your gallery before retrying; the exhibit may have been saved.'
+          )
+        }
+
         throw new Error(
-          data.error || 'Something went wrong while creating your exhibit.'
+          `The API returned HTTP ${response.status} without a JSON error message. Check the server terminal for the generation error.`
+        )
+      }
+
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        console.error('Exhibit creation returned no usable data.', {
+          status: response.status,
+          contentType: response.headers.get('content-type')
+        })
+        throw new Error(
+          'The server returned an empty or invalid response. Check your gallery before retrying; the exhibit may have been saved.'
         )
       }
 
@@ -173,7 +283,11 @@ function App() {
       await fetchExhibits()
 
     } catch (err) {
-      setError(err.message || 'Could not connect to the server.')
+      setError(
+        err instanceof TypeError
+          ? 'Could not connect to the server. Please try again.'
+          : err.message || 'Could not create your exhibit. Please try again.'
+      )
     } finally {
       setLoading(false)
     }
@@ -228,10 +342,12 @@ return (
               disabled={loading}
             />
 
-            <button type="submit" disabled={loading}>
+            <button type="submit" disabled={loading || backendStatus !== 'Connected'}>
               {loading
                 ? 'Our curator is preparing your exhibit...'
-                : 'Create my exhibit'}
+                : backendStatus === 'Connected'
+                  ? 'Create my exhibit'
+                  : 'Connecting to the museum...'}
             </button>
 
             {loading && (
@@ -269,6 +385,7 @@ return (
           <p className="eyebrow">THE COLLECTION</p>
           <h2>Memory Archive</h2>
           <p>Little moments, preserved in time.</p>
+          {deleteMessage && <p className="delete-success" role="status">{deleteMessage}</p>}
 
           {galleryLoading ? (
             <p>Opening the museum...</p>
@@ -277,26 +394,49 @@ return (
           ) : (
             <div className="exhibit-grid">
               {exhibits.map((item) => (
-                <article className="exhibit-card" key={item.id}>
-                  <p className="eyebrow">EXHIBIT #{item.id}</p>
-                  <h3>{item.title}</h3>
-                  <h4>{item.subtitle}</h4>
-                  <p>{item.description}</p>
-
-                  <div className="exhibit-tags">
-                    {item.tags?.map((tag) => (
-                      <span key={tag}>#{tag}</span>
-                    ))}
-                  </div>
-
-                  <small>
-                    {new Date(item.createdAt).toLocaleDateString()}
-                  </small>
-                </article>
+                <ExhibitCard
+                  exhibit={item}
+                  key={item.id}
+                  onDeleteRequest={requestDelete}
+                  isDeleting={deletingExhibitId === item.id}
+                />
               ))}
             </div>
           )}
         </section>
+        <dialog
+          ref={deleteDialogRef}
+          className="delete-dialog"
+          aria-labelledby="delete-dialog-title"
+          aria-describedby="delete-dialog-description"
+          aria-busy={deletingExhibitId !== null}
+          onCancel={handleDeleteDialogCancel}
+        >
+          <h2 id="delete-dialog-title">Delete this exhibit?</h2>
+          <p id="delete-dialog-description">
+            This memory will be permanently removed from your museum. This action cannot be undone.
+          </p>
+          {deleteError && <p className="delete-dialog__error" role="alert">{deleteError}</p>}
+          <div className="delete-dialog__actions">
+            <button
+              type="button"
+              className="delete-dialog__cancel"
+              onClick={cancelDelete}
+              disabled={deletingExhibitId !== null}
+              autoFocus
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="delete-dialog__confirm"
+              onClick={confirmDelete}
+              disabled={deletingExhibitId !== null}
+            >
+              {deletingExhibitId !== null ? 'Deleting...' : 'Delete exhibit'}
+            </button>
+          </div>
+        </dialog>
       </>
     )}
 
