@@ -56,6 +56,24 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRouter)
 app.use('/api/exhibits', exhibitsRouter)
 
+// Keep API middleware failures (for example, an unavailable session database)
+// in JSON format so API clients don't try to parse Express's default HTML page.
+app.use((error, req, res, next) => {
+  console.error('Request middleware error:', error)
+
+  if (res.headersSent) {
+    return next(error)
+  }
+
+  if (req.path.startsWith('/api/')) {
+    return res.status(503).json({
+      error: 'The service is temporarily unavailable. Please try again shortly.'
+    })
+  }
+
+  res.status(500).send('Internal server error.')
+})
+
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`)
 })

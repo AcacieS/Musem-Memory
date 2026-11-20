@@ -218,3 +218,60 @@
   .exhibit-card { transition: none; }
   .exhibit-card:hover { transform: none; }
 }
+
+.exhibit-card--showing-original {
+  max-height: none;
+}
+
+.exhibit-card__original-marker {
+  align-self: flex-start;
+  margin: 0 0 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--card-tag);
+  color: var(--card-accent);
+  font-family: Arial, sans-serif;
+  font-size: 0.65rem;
+  font-weight: bold;
+  letter-spacing: 0.13em;
+}
+
+.exhibit-card__description--original {
+  display: block;
+  max-height: 160px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-left: 2px solid var(--card-border-color);
+  border-radius: 0 6px 6px 0;
+  background: rgba(255, 255, 255, 0.28);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
+}
+
+.exhibit-card__memory-toggle {
+  align-self: flex-start;
+  margin-top: 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--card-border-color);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--card-accent);
+  font: 0.78rem Arial, sans-serif;
+  cursor: pointer;
+}
+
+.exhibit-card__memory-toggle:hover:not(:disabled) {
+  background: var(--card-tag);
+}
+
+.exhibit-card__memory-toggle:focus-visible {
+  outline: 3px solid var(--card-accent);
+  outline-offset: 2px;
+}
+
+.exhibit-card__memory-toggle:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

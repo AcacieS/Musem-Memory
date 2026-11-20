@@ -2,6 +2,24 @@
 import { useState } from 'react'
 import './AuthForm.css'
 
+async function readApiResponse(response) {
+  const body = await response.text()
+
+  if (!body) {
+    return {}
+  }
+
+  try {
+    return JSON.parse(body)
+  } catch {
+    if (!response.ok) {
+      throw new Error(`The server could not complete the request (HTTP ${response.status}).`)
+    }
+
+    throw new Error('The server returned an invalid response. Please try again.')
+  }
+}
+
 function AuthForm({ onAuthenticated }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
@@ -28,7 +46,7 @@ function AuthForm({ onAuthenticated }) {
         body: JSON.stringify({ email, password })
       })
 
-      const data = await response.json()
+      const data = await readApiResponse(response)
 
       if (!response.ok) {
         throw new Error(data.error || 'Authentication failed.')
@@ -46,7 +64,7 @@ function AuthForm({ onAuthenticated }) {
           body: JSON.stringify({ email, password })
         })
 
-        const loginData = await loginResponse.json()
+        const loginData = await readApiResponse(loginResponse)
 
         if (!loginResponse.ok) {
           throw new Error(
